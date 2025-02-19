@@ -70,12 +70,37 @@ onmessage = function (e) {
             postMessage({ type: "pixels-bw", pixels });
           }
         }
+      } else if (msg.type === "snake-position") {
+        console.log("snake-position", msg.snake);
+        const snake = msg.snake;
+        const myX = tabIndex;
+        const myY = windowIndex;
+        const pixels = [];
+
+        if (
+          snake.occupied.some((coord) => coord[0] === myX && coord[1] === myY)
+        ) {
+          pixels.push(1);
+        } else {
+          pixels.push(0);
+        }
+        if (lastPixels === null) {
+          lastPixels = pixels;
+          postMessage({ type: "pixels-bw", pixels });
+        } else {
+          const diff = pixels.filter((p, i) => p !== lastPixels[i]).length;
+          if (diff > 0) {
+            lastPixels = pixels;
+            postMessage({ type: "pixels-bw", pixels });
+          }
+        }
       }
     });
     regInterval = setInterval(() => {
       bc.postMessage({ type: "register", tabIndex, windowIndex });
     }, 1000);
   } else if (data.type === "relay-to-bc") {
+    console.log("relay-to-bc", data.msg);
     const message = { ...data.msg };
     bc.postMessage(message);
   }
