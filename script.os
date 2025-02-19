@@ -54,9 +54,9 @@ on makeWindow(x, y, width, height, numTabs, windowNum, maxWindows)
 end makeWindow
 
 global maxWindows
-set maxWindows to 4
+set maxWindows to 8
 
 repeat with i from 0 to (maxWindows - 1)
-    my makeWindow(0, 8+(i+1)*30, fullWidth, 86+30*maxWindows-13, 30, i, maxWindows)
+    my makeWindow(40, 40 + 8+(i+1)*30, fullWidth, 86+30*maxWindows-13, 30, i, maxWindows)
     delay 0.1
 end repeat
