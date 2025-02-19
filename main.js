@@ -114,6 +114,103 @@ function directionToDelta(direction) {
   }
 }
 
+function pongImpl({
+  bc,
+  worker,
+  numTabs,
+  numWindows,
+  fullWidth,
+  tabFullWidth,
+  leftPad,
+  tabSingle,
+  HARDCODED_HEIGHT,
+  TOP_TO_FAVICON,
+  topCanvasToBottomFavicon,
+  HARDCODED_WINDOW_DIFF,
+  playfieldHeightAboveCanvas,
+  fullPlayfieldHeight,
+  canvas,
+  ctx,
+}) {
+  const CELL_SIZE = 16;
+  const PLAYFIELD_WIDTH = tabFullWidth;
+  // const FAVICON_HEIGHT = CELL_SIZE * numWindows;
+  // const ABOVE_CANVAS_HEIGHT = FAVICON_HEIGHT + CELL_SIZE;
+  // const PLAYFIELD_HEIGHT = HARDCODED_HEIGHT + ABOVE_CANVAS_HEIGHT;
+  // const PLAYFIELD_HEIGHT = HARDCODED_HEIGHT * 2 + CELL_SIZE;
+  const PLAYFIELD_WIDTH_IN_SQUARES = numTabs - 1; // don't draw to rightmost tab
+  // const playfieldHeightAboveCanvas = fullPlayfieldHeight - HARDCODED_HEIGHT;
+
+  const PADDLE_WIDTH = 12;
+  const PADDLE_HEIGHT = 96;
+  const PADDLE_SPEED = 128;
+
+  const WIDTH_OF_ALL_FAVICONS = CELL_SIZE * PLAYFIELD_WIDTH_IN_SQUARES;
+  const CELL_HORIZONTAL_SPACING =
+    (tabFullWidth - WIDTH_OF_ALL_FAVICONS) / (PLAYFIELD_WIDTH_IN_SQUARES - 1);
+
+  const ourPaddle = {
+    x: CELL_SIZE + CELL_HORIZONTAL_SPACING,
+    y: playfieldHeightAboveCanvas - CELL_SIZE * 2,
+    w: PADDLE_WIDTH,
+    h: PADDLE_HEIGHT,
+  };
+
+  function transmit() {
+    const msg = {
+      type: "pong-position",
+      ourPaddle,
+    };
+    worker.postMessage({ type: "relay-to-bc", msg });
+  }
+
+  let downPressed = false;
+  let upPressed = false;
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      downPressed = true;
+    } else if (event.key === "ArrowUp") {
+      upPressed = true;
+    }
+  });
+
+  document.addEventListener("keyup", (event) => {
+    if (event.key === "ArrowDown") {
+      downPressed = false;
+    } else if (event.key === "ArrowUp") {
+      upPressed = false;
+    }
+  });
+
+  function loop({ deltaSeconds }) {
+    if (downPressed && !upPressed) {
+      ourPaddle.y += PADDLE_SPEED * deltaSeconds;
+      if (ourPaddle.y + ourPaddle.h > fullPlayfieldHeight) {
+        ourPaddle.y = fullPlayfieldHeight - ourPaddle.h;
+      }
+    } else if (upPressed && !downPressed) {
+      ourPaddle.y -= PADDLE_SPEED * deltaSeconds;
+      if (ourPaddle.y < 0) {
+        ourPaddle.y = 0;
+      }
+    }
+
+    const botOnCanvas = ourPaddle.y + ourPaddle.h - playfieldHeightAboveCanvas;
+    ctx.fillStyle = "white";
+    ctx.fillRect(0, 0, tabFullWidth, HARDCODED_HEIGHT);
+    ctx.fillStyle = "black";
+    if (botOnCanvas > 0) {
+      let topOnCanvas = ourPaddle.y - playfieldHeightAboveCanvas;
+      topOnCanvas = Math.max(0, topOnCanvas);
+      const heightNow = botOnCanvas - topOnCanvas;
+      ctx.fillRect(ourPaddle.x, topOnCanvas, ourPaddle.w, heightNow);
+    }
+  }
+
+  return { transmit, loop };
+}
+
 function snakeImpl({
   bc,
   worker,
@@ -159,9 +256,7 @@ function snakeImpl({
   }
 
   const SQUARES_PER_SECOND = 4;
-  const SUB_SQUARES_PER_SECOND = 10;
   const MS_TO_A_MOVE = 1000 / SQUARES_PER_SECOND;
-  const MS_TO_A_SUB_MOVE = MS_TO_A_MOVE / SUB_SQUARES_PER_SECOND;
   let accumulatedDelta = 0;
 
   document.addEventListener("keydown", (event) => {
@@ -222,6 +317,7 @@ function snakeImpl({
         const y = (coord[1] - upperBound) * (CELL_SIZE + CELL_VERTICAL_SPACING);
         ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
 
+        // nicely connect cells so that they're continuous when not favicons.
         if (last !== null) {
           if (coord[0] - 1 === last.coord[0] && coord[1] === last.coord[1]) {
             // we're one to the right of the last one
@@ -273,18 +369,6 @@ function snakeImpl({
   function loop({ deltaSeconds }) {
     accumulatedDelta += deltaSeconds * 1000;
     let didMove = false;
-    // while (accumulatedDelta >= MS_TO_A_SUB_MOVE) {
-    //   accumulatedDelta -= MS_TO_A_SUB_MOVE;
-    //   const [dx, dy] = directionToDelta(snake.direction);
-    //   const head = snake.occupied[snake.occupied.length - 1];
-    //   const newHead = [
-    //     head[0] + dx / SUB_SQUARES_PER_SECOND,
-    //     head[1] + dy / SUB_SQUARES_PER_SECOND,
-    //   ];
-    //   snake.occupied.push(newHead);
-    //   snake.occupied.shift();
-    //   didMove = true;
-    // }
     while (accumulatedDelta >= MS_TO_A_MOVE) {
       accumulatedDelta -= MS_TO_A_MOVE;
       const [dx, dy] = directionToDelta(snake.direction);
@@ -356,7 +440,13 @@ function runLoopGeneric({ bc, worker, numTabs, numWindows, fullWidth, impl }) {
     ctx,
   };
 
-  bc.postMessage({ type: "window-info", tabSingle });
+  const CELL_SIZE = 16;
+  const PLAYFIELD_WIDTH_IN_SQUARES = numTabs - 1; // don't draw to rightmost tab
+  const WIDTH_OF_ALL_FAVICONS = CELL_SIZE * PLAYFIELD_WIDTH_IN_SQUARES;
+  const CELL_HORIZONTAL_SPACING =
+    (tabFullWidth - WIDTH_OF_ALL_FAVICONS) / (PLAYFIELD_WIDTH_IN_SQUARES - 1);
+
+  bc.postMessage({ type: "window-info", tabSingle, CELL_HORIZONTAL_SPACING });
 
   let transmit, loop, transmitTime;
   if (impl === "square") {
@@ -364,6 +454,9 @@ function runLoopGeneric({ bc, worker, numTabs, numWindows, fullWidth, impl }) {
     transmitTime = 20;
   } else if (impl === "snake") {
     ({ transmit, loop } = snakeImpl(args));
+    transmitTime = 20;
+  } else if (impl === "pong") {
+    ({ transmit, loop } = pongImpl(args));
     transmitTime = 20;
   } else {
     throw new Error(`Unknown impl: ${impl}`);
@@ -455,7 +548,7 @@ function initialize() {
             numTabs,
             numWindows,
             fullWidth,
-            impl: "snake",
+            impl: "pong",
           });
         }
       }
