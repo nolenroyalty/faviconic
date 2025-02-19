@@ -24,15 +24,15 @@ function intersects(fst, snd) {
   );
 }
 
-function maybeDrawPixels(pixels) {
+function maybeDrawPixels({ pixels, type = "pixels-bw" }) {
   if (lastPixels === null) {
     lastPixels = pixels;
-    postMessage({ type: "pixels-bw", pixels });
+    postMessage({ type, pixels });
   } else {
     const diff = pixels.filter((p, i) => p !== lastPixels[i]).length;
     if (diff > 0) {
       lastPixels = pixels;
-      postMessage({ type: "pixels-bw", pixels });
+      postMessage({ type, pixels });
     }
   }
 }
@@ -77,7 +77,6 @@ onmessage = function (e) {
         }
         maybeDrawPixels(pixels);
       } else if (msg.type === "snake-position") {
-        console.log("snake-position", msg.snake);
         const snake = msg.snake;
         const myX = tabIndex;
         const myY = windowIndex;
@@ -90,10 +89,11 @@ onmessage = function (e) {
         } else {
           pixels.push(0);
         }
-        maybeDrawPixels(pixels);
+        maybeDrawPixels({ pixels });
       } else if (msg.type === "pong-position") {
-        console.log("pong-position", msg.ourPaddle);
         const ourPaddle = msg.ourPaddle;
+        const ball = msg.ball;
+        const theirPaddle = msg.theirPaddle;
         const pixels = [];
         for (let yy = 0; yy < PIXEL_COUNT; yy++) {
           for (let xx = 0; xx < PIXEL_COUNT; xx++) {
@@ -103,18 +103,27 @@ onmessage = function (e) {
             const y =
               TOP_TO_FAVICON + HARDCODED_WINDOW_DIFF * windowIndex + yy * MULT;
             let thisSquare = { x, y, w: MULT, h: MULT };
-            const doesIntersect = intersects(ourPaddle, thisSquare);
-            pixels.push(doesIntersect ? 1 : 0);
+            const intersectOurPaddle = intersects(ourPaddle, thisSquare);
+            const intersectBall = intersects(ball, thisSquare);
+            const intersectTheirPaddle = intersects(theirPaddle, thisSquare);
+            if (intersectOurPaddle) {
+              pixels.push(2);
+            } else if (intersectBall) {
+              pixels.push(3);
+            } else if (intersectTheirPaddle) {
+              pixels.push(4);
+            } else {
+              pixels.push(1);
+            }
           }
         }
-        maybeDrawPixels(pixels);
+        maybeDrawPixels({ pixels, type: "pixels-color" });
       }
     });
     regInterval = setInterval(() => {
       bc.postMessage({ type: "register", tabIndex, windowIndex });
     }, 1000);
   } else if (data.type === "relay-to-bc") {
-    console.log("relay-to-bc", data.msg);
     const message = { ...data.msg };
     bc.postMessage(message);
   }

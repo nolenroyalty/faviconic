@@ -1,5 +1,17 @@
 const BLACK = "#000";
 const WHITE = "#fff";
+const AMBER = "#F59E0B";
+const BACKGROUND = "#334155";
+const PINK = "#E879F9";
+const PURPLE = "#C084FC";
+const CYAN = "#22D3EE";
+
+const COLOR_INDICES = {
+  1: BACKGROUND,
+  2: AMBER,
+  3: PURPLE,
+  4: CYAN,
+};
 
 function setFaviconToUrl(url) {
   let link = document.querySelector("link[rel='icon']");
@@ -10,6 +22,18 @@ function setFaviconToUrl(url) {
   }
   link.href = url;
   // we could try reloading here if need be?
+}
+
+function intersects(fst, snd) {
+  // Check if two rectangles intersect by comparing their bounds
+  return !(
+    (
+      fst.x + fst.w < snd.x || // fst is left of snd
+      snd.x + snd.w < fst.x || // fst is right of snd
+      fst.y + fst.h < snd.y || // fst is above snd
+      snd.y + snd.h < fst.y
+    ) // fst is below snd
+  );
 }
 
 let bwCanvas = null;
@@ -36,6 +60,32 @@ function faviconOfPixelsBW(pixels) {
     ctx.fillRect(x, y, 1, 1);
   }
   return bwCanvas.toDataURL("image/png");
+}
+
+let colorCanvas = null;
+function faviconOfPixelsColor(pixels) {
+  const len = pixels.length;
+  const width = Math.floor(Math.sqrt(len));
+  if (width * width !== len) {
+    throw new Error(`Invalid pixel array: must be a square (${len} pixels)`);
+  }
+  if (colorCanvas === null) {
+    colorCanvas = document.createElement("canvas");
+    colorCanvas.width = width;
+    colorCanvas.height = width;
+  } else {
+    colorCanvas.getContext("2d").clearRect(0, 0, width, width);
+  }
+
+  const ctx = colorCanvas.getContext("2d");
+  for (let i = 0; i < len; i++) {
+    const x = i % width;
+    const y = Math.floor(i / width);
+    const index = (y * width + x) * 4;
+    ctx.fillStyle = COLOR_INDICES[pixels[i]];
+    ctx.fillRect(x, y, 1, 1);
+  }
+  return colorCanvas.toDataURL("image/png");
 }
 
 function squareImpl({
@@ -140,26 +190,84 @@ function pongImpl({
   // const PLAYFIELD_HEIGHT = HARDCODED_HEIGHT * 2 + CELL_SIZE;
   const PLAYFIELD_WIDTH_IN_SQUARES = numTabs - 1; // don't draw to rightmost tab
   // const playfieldHeightAboveCanvas = fullPlayfieldHeight - HARDCODED_HEIGHT;
+  const scores = document.createElement("p");
+  scores.style.position = "absolute";
+  scores.style.top = "100%";
+  scores.style.left = "100%";
+  scores.style.color = "white";
+  scores.style.fontSize = "16px";
+  scores.style.fontFamily = "monospace";
+  scores.style.pointerEvents = "none";
+  scores.style.transform = "translate(-110%, -110%)";
+  scores.textContent = "0 - 0";
+  document.body.appendChild(scores);
+
+  let leftScore = 0;
+  let rightScore = 0;
 
   const PADDLE_WIDTH = 12;
   const PADDLE_HEIGHT = 96;
   const PADDLE_SPEED = 128;
-
+  const DEFAULT_BALL_SPEED = 180;
   const WIDTH_OF_ALL_FAVICONS = CELL_SIZE * PLAYFIELD_WIDTH_IN_SQUARES;
   const CELL_HORIZONTAL_SPACING =
     (tabFullWidth - WIDTH_OF_ALL_FAVICONS) / (PLAYFIELD_WIDTH_IN_SQUARES - 1);
+  let BALL_SPEED = DEFAULT_BALL_SPEED;
 
-  const ourPaddle = {
+  const defaultBallParams = () => ({
+    x: CELL_SIZE * 3 + CELL_HORIZONTAL_SPACING * 2,
+    y: playfieldHeightAboveCanvas - CELL_SIZE * 2,
+    w: CELL_SIZE * 1.5,
+    h: CELL_SIZE * 1.5,
+    dx: Math.sqrt(2) / 2,
+    dy: Math.sqrt(2) / 2,
+  });
+
+  const defaultOurPaddleParams = () => ({
     x: CELL_SIZE + CELL_HORIZONTAL_SPACING,
     y: playfieldHeightAboveCanvas - CELL_SIZE * 2,
     w: PADDLE_WIDTH,
     h: PADDLE_HEIGHT,
-  };
+  });
+
+  const defaultTheirPaddleParams = () => ({
+    x: tabFullWidth - PADDLE_WIDTH - CELL_SIZE - CELL_HORIZONTAL_SPACING,
+    y: playfieldHeightAboveCanvas - CELL_SIZE * 2,
+    w: PADDLE_WIDTH,
+    h: PADDLE_HEIGHT,
+  });
+
+  const ball = defaultBallParams();
+
+  const ourPaddle = defaultOurPaddleParams();
+  const theirPaddle = defaultTheirPaddleParams();
+
+  function updateScoresAndReset({ leftWon }) {
+    if (leftWon) {
+      leftScore += 1;
+    } else {
+      rightScore += 1;
+    }
+    BALL_SPEED = DEFAULT_BALL_SPEED;
+    scores.textContent = `${leftScore} - ${rightScore}`;
+
+    Object.entries(defaultBallParams()).forEach(([key, value]) => {
+      ball[key] = value;
+    });
+    Object.entries(defaultOurPaddleParams()).forEach(([key, value]) => {
+      ourPaddle[key] = value;
+    });
+    Object.entries(defaultTheirPaddleParams()).forEach(([key, value]) => {
+      theirPaddle[key] = value;
+    });
+  }
 
   function transmit() {
     const msg = {
       type: "pong-position",
       ourPaddle,
+      theirPaddle,
+      ball,
     };
     worker.postMessage({ type: "relay-to-bc", msg });
   }
@@ -183,6 +291,18 @@ function pongImpl({
     }
   });
 
+  function drawRect(rect, color) {
+    const botOnCanvas = rect.y + rect.h - playfieldHeightAboveCanvas;
+
+    ctx.fillStyle = color;
+    if (botOnCanvas > 0) {
+      let topOnCanvas = rect.y - playfieldHeightAboveCanvas;
+      topOnCanvas = Math.max(0, topOnCanvas);
+      const heightNow = botOnCanvas - topOnCanvas;
+      ctx.fillRect(rect.x, topOnCanvas, rect.w, heightNow);
+    }
+  }
+
   function loop({ deltaSeconds }) {
     if (downPressed && !upPressed) {
       ourPaddle.y += PADDLE_SPEED * deltaSeconds;
@@ -196,16 +316,74 @@ function pongImpl({
       }
     }
 
-    const botOnCanvas = ourPaddle.y + ourPaddle.h - playfieldHeightAboveCanvas;
-    ctx.fillStyle = "white";
-    ctx.fillRect(0, 0, tabFullWidth, HARDCODED_HEIGHT);
-    ctx.fillStyle = "black";
-    if (botOnCanvas > 0) {
-      let topOnCanvas = ourPaddle.y - playfieldHeightAboveCanvas;
-      topOnCanvas = Math.max(0, topOnCanvas);
-      const heightNow = botOnCanvas - topOnCanvas;
-      ctx.fillRect(ourPaddle.x, topOnCanvas, ourPaddle.w, heightNow);
+    const theirPaddleCenter = theirPaddle.y + theirPaddle.h / 2;
+    const ballCenter = ball.y + ball.h / 2;
+    if (ballCenter > theirPaddleCenter) {
+      const diff = ballCenter - theirPaddleCenter;
+      const maxMove = PADDLE_SPEED * deltaSeconds;
+      if (diff > maxMove) {
+        theirPaddle.y += maxMove;
+      } else {
+        theirPaddle.y += diff;
+      }
+      if (theirPaddle.y + theirPaddle.h > fullPlayfieldHeight) {
+        theirPaddle.y = fullPlayfieldHeight - theirPaddle.h;
+      }
+    } else if (ballCenter < theirPaddleCenter) {
+      const diff = theirPaddleCenter - ballCenter;
+      const maxMove = PADDLE_SPEED * deltaSeconds;
+      if (diff > maxMove) {
+        theirPaddle.y -= maxMove;
+      } else {
+        theirPaddle.y -= diff;
+      }
+      if (theirPaddle.y < 0) {
+        theirPaddle.y = 0;
+      }
     }
+
+    ball.x += BALL_SPEED * deltaSeconds * ball.dx;
+    ball.y += BALL_SPEED * deltaSeconds * ball.dy;
+    if (ball.x < 0) {
+      ball.x = 0;
+      ball.dx *= -1;
+      updateScoresAndReset({ leftWon: false });
+    } else if (ball.x + ball.w > PLAYFIELD_WIDTH) {
+      ball.x = tabFullWidth - ball.w;
+      ball.dx *= -1;
+      updateScoresAndReset({ leftWon: true });
+    } else if (ball.dx < 0 && intersects(ball, ourPaddle)) {
+      ball.x = ourPaddle.x + ourPaddle.w;
+      const hitPosition = ball.y + ball.h / 2 - (ourPaddle.y + ourPaddle.h / 2);
+      const normalizedHitPosition = hitPosition / (ourPaddle.h / 2);
+
+      const bounceAngle = (normalizedHitPosition * Math.PI) / 3;
+      ball.dx = Math.cos(bounceAngle);
+      ball.dy = Math.sin(bounceAngle);
+      BALL_SPEED += 1;
+    } else if (ball.dx > 0 && intersects(ball, theirPaddle)) {
+      ball.x = theirPaddle.x - ball.w;
+      const hitPosition =
+        ball.y + ball.h / 2 - (theirPaddle.y + theirPaddle.h / 2);
+      const normalizedHitPosition = hitPosition / (theirPaddle.h / 2);
+      const bounceAngle = (normalizedHitPosition * Math.PI) / 3;
+      ball.dx = -Math.cos(bounceAngle);
+      ball.dy = Math.sin(bounceAngle);
+      BALL_SPEED += 1;
+    }
+    if (ball.y < 0) {
+      ball.y = 0;
+      ball.dy *= -1;
+    } else if (ball.y + ball.h > fullPlayfieldHeight) {
+      ball.y = fullPlayfieldHeight - ball.h;
+      ball.dy *= -1;
+    }
+
+    ctx.fillStyle = BACKGROUND;
+    ctx.fillRect(0, 0, tabFullWidth, HARDCODED_HEIGHT);
+    drawRect(ourPaddle, AMBER);
+    drawRect(ball, PURPLE);
+    drawRect(theirPaddle, CYAN);
   }
 
   return { transmit, loop };
@@ -406,9 +584,9 @@ function runLoopGeneric({ bc, worker, numTabs, numWindows, fullWidth, impl }) {
   const topCanvasToBottomFavicon = 58; // gap between bottom favicon and the canvas
   const fullPlayfieldHeight =
     HARDCODED_HEIGHT +
-    TOP_TO_FAVICON +
     topCanvasToBottomFavicon +
     numWindows * HARDCODED_WINDOW_DIFF;
+  // + TOP_TO_FAVICON
 
   // height of the playfield above the canvas
   const playfieldHeightAboveCanvas = fullPlayfieldHeight - HARDCODED_HEIGHT;
@@ -478,7 +656,6 @@ function runLoopGeneric({ bc, worker, numTabs, numWindows, fullWidth, impl }) {
     loop({ deltaSeconds });
     if (realNow - lastTransmit > transmitTime) {
       lastTransmit = realNow;
-      console.log("TRANSMIT");
       transmit();
     }
     requestAnimationFrame(animationFrameLoop);
@@ -511,6 +688,9 @@ function initialize() {
     const data = event.data;
     if (data && data.type === "pixels-bw") {
       const url = faviconOfPixelsBW(data.pixels);
+      setFaviconToUrl(url);
+    } else if (data && data.type === "pixels-color") {
+      const url = faviconOfPixelsColor(data.pixels);
       setFaviconToUrl(url);
     } else if (data && data.type === "registration-ack") {
       console.log("Registration acknowledged.");
