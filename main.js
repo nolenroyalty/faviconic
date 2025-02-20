@@ -5,7 +5,7 @@ const BACKGROUND = "#334155";
 const PINK = "#E879F9";
 const PURPLE = "#C084FC";
 const CYAN = "#22D3EE";
-const RED = "#F87171";
+const TRAIL = "#9333EA";
 
 const COLOR_INDICES = {
   1: BACKGROUND,
@@ -201,11 +201,10 @@ function pongImpl({
   rightScoreP.textContent = "0";
   scores.appendChild(leftScoreP);
   scores.appendChild(rightScoreP);
-  document.body.appendChild(scores);
 
   let leftScore = 0;
   let rightScore = 0;
-  let gameState = "has-not-drawn";
+  let gameState = "first-play-no-draw";
 
   const PADDLE_WIDTH = 12;
   const PADDLE_HEIGHT = 96;
@@ -288,21 +287,22 @@ function pongImpl({
   let downPressed = false;
   let upPressed = false;
 
+  function maybeStart() {
+    if (gameState === "has-drawn-waiting-for-start") {
+      gameState = "in-progress";
+    } else if (gameState === "first-play-no-draw") {
+      gameState = "in-progress";
+      document.body.appendChild(scores);
+    }
+  }
+
   document.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown") {
-      if (gameState === "has-drawn-waiting-for-start") {
-        gameState = "in-progress";
-      }
       downPressed = true;
     } else if (event.key === "ArrowUp") {
-      if (gameState === "has-drawn-waiting-for-start") {
-        gameState = "in-progress";
-      }
       upPressed = true;
     } else if (event.key === " ") {
-      if (gameState === "has-drawn-waiting-for-start") {
-        gameState = "in-progress";
-      }
+      maybeStart();
     }
   });
 
@@ -336,6 +336,8 @@ function pongImpl({
       gameState = "has-drawn-waiting-for-start";
       return;
     } else if (gameState === "has-drawn-waiting-for-start") {
+      return;
+    } else if (gameState === "first-play-no-draw") {
       return;
     }
 
@@ -435,7 +437,7 @@ function pongImpl({
       const diff = now - b.now;
       if (diff <= TRAIL_DURATION_MS) {
         const t = (now - b.now) / TRAIL_DURATION_MS;
-        const mult = (1 - t) ** 3;
+        const mult = (1 - t) ** 2;
         const size = mult * BALL_SIZE;
         const offset = (BALL_SIZE - size) / 2;
         const rect = {
@@ -444,8 +446,8 @@ function pongImpl({
           w: size,
           h: size,
         };
-        ctx.globalAlpha = 0.6 * mult;
-        drawRect(rect, RED);
+        ctx.globalAlpha = 0.3 * mult;
+        drawRect(rect, TRAIL);
       }
     });
     ctx.globalAlpha = 1;
