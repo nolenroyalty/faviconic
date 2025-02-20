@@ -15,8 +15,37 @@
       }
 
       canvas {
-        background-color: white;
+        background-color: #334155;
         position: absolute;
+      }
+
+      .scores {
+        position: absolute;
+        top: 50%;
+        left: 0%;
+        transform: translate(0%, -50%);
+        display: flex;
+        justify-content: space-between;
+        padding: 0 2rem;
+        margin: 0;
+        width: 100%;
+        box-sizing: border-box;
+      }
+
+      .scores p {
+        margin: 0;
+        font-family: monospace;
+        font-size: 2rem;
+      }
+
+      .left-score {
+        text-align: left;
+        color: #f59e0b;
+      }
+
+      .right-score {
+        text-align: right;
+        color: #22d3ee;
       }
     </style>
     <script src="main.js"></script>

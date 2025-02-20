@@ -5,6 +5,7 @@ const BACKGROUND = "#334155";
 const PINK = "#E879F9";
 const PURPLE = "#C084FC";
 const CYAN = "#22D3EE";
+const RED = "#F87171";
 
 const COLOR_INDICES = {
   1: BACKGROUND,
@@ -190,35 +191,42 @@ function pongImpl({
   // const PLAYFIELD_HEIGHT = HARDCODED_HEIGHT * 2 + CELL_SIZE;
   const PLAYFIELD_WIDTH_IN_SQUARES = numTabs - 1; // don't draw to rightmost tab
   // const playfieldHeightAboveCanvas = fullPlayfieldHeight - HARDCODED_HEIGHT;
-  const scores = document.createElement("p");
-  scores.style.position = "absolute";
-  scores.style.top = "100%";
-  scores.style.left = "100%";
-  scores.style.color = "white";
-  scores.style.fontSize = "16px";
-  scores.style.fontFamily = "monospace";
-  scores.style.pointerEvents = "none";
-  scores.style.transform = "translate(-110%, -110%)";
-  scores.textContent = "0 - 0";
+  const scores = document.createElement("div");
+  scores.classList.add("scores");
+  const leftScoreP = document.createElement("p");
+  const rightScoreP = document.createElement("p");
+  leftScoreP.classList.add("left-score");
+  rightScoreP.classList.add("right-score");
+  leftScoreP.textContent = "0";
+  rightScoreP.textContent = "0";
+  scores.appendChild(leftScoreP);
+  scores.appendChild(rightScoreP);
   document.body.appendChild(scores);
 
   let leftScore = 0;
   let rightScore = 0;
+  let gameState = "has-not-drawn";
 
   const PADDLE_WIDTH = 12;
   const PADDLE_HEIGHT = 96;
   const PADDLE_SPEED = 128;
   const DEFAULT_BALL_SPEED = 180;
+  const MAX_TRAILS = 60;
+  const TRAIL_EVERY_MS = 25;
+  const TRAIL_DURATION_MS = 1500;
+  let oldBalls = [];
+  let lastTrailTime = 0;
   const WIDTH_OF_ALL_FAVICONS = CELL_SIZE * PLAYFIELD_WIDTH_IN_SQUARES;
   const CELL_HORIZONTAL_SPACING =
     (tabFullWidth - WIDTH_OF_ALL_FAVICONS) / (PLAYFIELD_WIDTH_IN_SQUARES - 1);
   let BALL_SPEED = DEFAULT_BALL_SPEED;
 
+  const BALL_SIZE = CELL_SIZE * 1.5;
   const defaultBallParams = () => ({
-    x: CELL_SIZE * 3 + CELL_HORIZONTAL_SPACING * 2,
-    y: playfieldHeightAboveCanvas - CELL_SIZE * 2,
-    w: CELL_SIZE * 1.5,
-    h: CELL_SIZE * 1.5,
+    x: PLAYFIELD_WIDTH / 2 - BALL_SIZE / 2,
+    y: playfieldHeightAboveCanvas + HARDCODED_HEIGHT / 2 - BALL_SIZE / 2,
+    w: BALL_SIZE,
+    h: BALL_SIZE,
     dx: Math.sqrt(2) / 2,
     dy: Math.sqrt(2) / 2,
   });
@@ -245,11 +253,12 @@ function pongImpl({
   function updateScoresAndReset({ leftWon }) {
     if (leftWon) {
       leftScore += 1;
+      leftScoreP.textContent = leftScore;
     } else {
       rightScore += 1;
+      rightScoreP.textContent = rightScore;
     }
     BALL_SPEED = DEFAULT_BALL_SPEED;
-    scores.textContent = `${leftScore} - ${rightScore}`;
 
     Object.entries(defaultBallParams()).forEach(([key, value]) => {
       ball[key] = value;
@@ -260,6 +269,10 @@ function pongImpl({
     Object.entries(defaultTheirPaddleParams()).forEach(([key, value]) => {
       theirPaddle[key] = value;
     });
+    oldBalls = [];
+    lastTrailTime = 0;
+
+    gameState = "has-not-drawn";
   }
 
   function transmit() {
@@ -277,9 +290,19 @@ function pongImpl({
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown") {
+      if (gameState === "has-drawn-waiting-for-start") {
+        gameState = "in-progress";
+      }
       downPressed = true;
     } else if (event.key === "ArrowUp") {
+      if (gameState === "has-drawn-waiting-for-start") {
+        gameState = "in-progress";
+      }
       upPressed = true;
+    } else if (event.key === " ") {
+      if (gameState === "has-drawn-waiting-for-start") {
+        gameState = "in-progress";
+      }
     }
   });
 
@@ -304,6 +327,18 @@ function pongImpl({
   }
 
   function loop({ deltaSeconds }) {
+    if (gameState === "has-not-drawn") {
+      ctx.fillStyle = BACKGROUND;
+      ctx.fillRect(0, 0, tabFullWidth, HARDCODED_HEIGHT);
+      drawRect(ourPaddle, AMBER);
+      drawRect(ball, PURPLE);
+      drawRect(theirPaddle, CYAN);
+      gameState = "has-drawn-waiting-for-start";
+      return;
+    } else if (gameState === "has-drawn-waiting-for-start") {
+      return;
+    }
+
     if (downPressed && !upPressed) {
       ourPaddle.y += PADDLE_SPEED * deltaSeconds;
       if (ourPaddle.y + ourPaddle.h > fullPlayfieldHeight) {
@@ -379,8 +414,41 @@ function pongImpl({
       ball.dy *= -1;
     }
 
+    const now = performance.now();
+    if (lastTrailTime === 0 || now - lastTrailTime > TRAIL_EVERY_MS) {
+      oldBalls.push({
+        x: ball.x,
+        y: ball.y,
+        w: ball.w,
+        h: ball.h,
+        now,
+      });
+      lastTrailTime = now;
+      while (oldBalls.length > MAX_TRAILS) {
+        oldBalls.shift();
+      }
+    }
+
     ctx.fillStyle = BACKGROUND;
     ctx.fillRect(0, 0, tabFullWidth, HARDCODED_HEIGHT);
+    oldBalls.forEach((b) => {
+      const diff = now - b.now;
+      if (diff <= TRAIL_DURATION_MS) {
+        const t = (now - b.now) / TRAIL_DURATION_MS;
+        const mult = (1 - t) ** 3;
+        const size = mult * BALL_SIZE;
+        const offset = (BALL_SIZE - size) / 2;
+        const rect = {
+          x: b.x + offset,
+          y: b.y + offset,
+          w: size,
+          h: size,
+        };
+        ctx.globalAlpha = 0.6 * mult;
+        drawRect(rect, RED);
+      }
+    });
+    ctx.globalAlpha = 1;
     drawRect(ourPaddle, AMBER);
     drawRect(ball, PURPLE);
     drawRect(theirPaddle, CYAN);
@@ -730,6 +798,12 @@ function initialize() {
             fullWidth,
             impl: "pong",
           });
+        } else {
+          console.log(
+            `${
+              Object.keys(registrations).length
+            } / ${expected} tabs registered.`
+          );
         }
       }
     });
